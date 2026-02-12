@@ -76,6 +76,13 @@ class AdminListView(generics.ListAPIView):
             
         return queryset
 
+class HealthCheckView(APIView):
+    """
+    Simple endpoint to keep the server alive.
+    """
+    def get(self, request):
+        return Response({"status": "alive", "message": "Server is running"})
+
 class MyTicketsView(generics.ListAPIView):
     serializer_class = TicketSerializer
 
