@@ -4,6 +4,15 @@ from rest_framework import status, generics
 from .models import UserProfile, Ticket, Film
 from .serializers import TicketSerializer, UserSerializer
 
+VENUE_CAPACITIES = {
+    "Chemical Seminar Hall": 70,
+    "Arch Seminar Hall": 120,
+    "EEE Seminar Hall": 100,
+    "PTA": 70,
+    "APJ": 120,
+    "AUDITORIUM": 700
+}
+
 class RegisterView(APIView):
     def post(self, request):
         data = request.data
@@ -29,11 +38,19 @@ class RegisterView(APIView):
             }
         )
 
-        # 3. Prevent Duplicate Booking
+        # 3. Check Venue Capacity
+        venue_name = film.venue
+        capacity = VENUE_CAPACITIES.get(venue_name, 700) # Default to 700 if unknown
+        current_count = Ticket.objects.filter(film=film).count()
+        
+        if current_count >= capacity:
+             return Response({"message": f"Housefull! Venue capacity of {capacity} reached."}, status=400)
+
+        # 4. Prevent Duplicate Booking
         if Ticket.objects.filter(user=user, film=film).exists():
              return Response({"message": "Already registered!"}, status=400)
 
-        # 4. Create Ticket (QR generates automatically)
+        # 5. Create Ticket (QR generates automatically)
         ticket = Ticket.objects.create(user=user, film=film)
         
         return Response({
@@ -88,21 +105,36 @@ class HealthCheckView(APIView):
     def get(self, request):
         return Response({"status": "alive", "message": "Server is running"})
 
-from django.db.models import Count
+from django.db.models import Count, F
 
 class AdminStatsView(APIView):
     def get(self, request):
         total_tickets = Ticket.objects.count()
         checked_in_count = Ticket.objects.filter(is_checked_in=True).count()
         
-        # Group by film title and count
-        film_stats = Ticket.objects.values('film__title', 'film__slug').annotate(count=Count('id')).order_by('-count')
+        # Group by film title, slug, venue and count
+        film_stats = Ticket.objects.values('film__title', 'film__slug', 'film__venue').annotate(count=Count('id')).order_by('-count')
+        
+        # Add capacity info
+        results = []
+        for item in film_stats:
+            venue = item.get('film__venue')
+            count = item.get('count', 0)
+            capacity = VENUE_CAPACITIES.get(venue, 700)
+            
+            results.append({
+                "film__title": item['film__title'],
+                "film__slug": item['film__slug'],
+                "count": count,
+                "capacity": capacity,
+                "is_full": count >= capacity
+            })
         
         return Response({
             "total": total_tickets,
             "checked_in": checked_in_count,
             "pending": total_tickets - checked_in_count,
-            "by_film": film_stats
+            "by_film": results
         })
 
 class MyTicketsView(generics.ListAPIView):
