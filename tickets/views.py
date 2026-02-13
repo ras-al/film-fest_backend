@@ -58,9 +58,14 @@ class AdminScanView(APIView):
             
 class AdminListView(generics.ListAPIView):
     serializer_class = TicketSerializer
+    pagination_class = None # We will implement manual offset/limit handling if needed, but for now we'll rely on DRF's default if configured, or just optimized query.
+    # Actually, the user asked for "scroll option", implying pagination. Let's add LimitOffsetPagination.
+    from rest_framework.pagination import LimitOffsetPagination
+    pagination_class = LimitOffsetPagination
 
     def get_queryset(self):
-        queryset = Ticket.objects.all().order_by('-created_at')
+        # Optimize query: select_related fetches related objects in the same query
+        queryset = Ticket.objects.select_related('user', 'film').all().order_by('-created_at')
         
         # Filter by Film Slug
         film_slug = self.request.query_params.get('film')
@@ -82,6 +87,23 @@ class HealthCheckView(APIView):
     """
     def get(self, request):
         return Response({"status": "alive", "message": "Server is running"})
+
+from django.db.models import Count
+
+class AdminStatsView(APIView):
+    def get(self, request):
+        total_tickets = Ticket.objects.count()
+        checked_in_count = Ticket.objects.filter(is_checked_in=True).count()
+        
+        # Group by film title and count
+        film_stats = Ticket.objects.values('film__title', 'film__slug').annotate(count=Count('id')).order_by('-count')
+        
+        return Response({
+            "total": total_tickets,
+            "checked_in": checked_in_count,
+            "pending": total_tickets - checked_in_count,
+            "by_film": film_stats
+        })
 
 class MyTicketsView(generics.ListAPIView):
     serializer_class = TicketSerializer
